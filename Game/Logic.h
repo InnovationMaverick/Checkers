@@ -22,20 +22,28 @@ class Logic
     // Метод для поиска лучших ходов для заданного цвета true - белые, false - черные
     vector<move_pos> find_best_turns(const bool color)
     {
-        next_best_state.clear();
-        next_move.clear();
+        next_best_state.clear(); // Очищаем предыдущие состояния
+        next_move.clear(); // Очищаем возможные ходы
 
-        // Здесь должна быть реализация вызова find_first_best_turn с начальными параметрами
+        // Получаем текущее состояние доски
+        vector<vector<POS_T>> mtx = board->get_board(); // Получаем состояние доски
+        double score = find_first_best_turn(mtx, color, -1, -1, 0, -1); // Вызов метода для нахождения первого лучшего хода 
 
-        int cur_state = 0;
-        vector<move_pos> res;
+        // Генерация последовательности ходов
+        int cur_state = 0; // Начальное состояние
+        vector<move_pos> res; // Вектор для хранения найденных ходов
+
+        // Цикл, чтобы извлечь все ходы, начиная с текущего состояния
         do
         {
-            res.push_back(next_move[cur_state]);
-            cur_state = next_best_state[cur_state];
-        } while (cur_state != -1 && next_move[cur_state].x != -1);
-        return res;
+            res.push_back(next_move[cur_state]); // Добавление текущего хода в результат
+            cur_state = next_best_state[cur_state]; // Переход к следующему состоянию
+        } while (cur_state != -1 && next_move[cur_state].x != -1); // Проверяем, есть ли еще состояния для обработки
+
+        return res; // Возвращаем вектор найденных ходов
     }
+
+
 
 private:
     // Метод для применения хода и возврата новой матрицы
@@ -89,19 +97,114 @@ private:
     }
 
     double find_first_best_turn(vector<vector<POS_T>> mtx, const bool color, const POS_T x, const POS_T y, size_t state,
-                                double alpha = -1)
+        double alpha = -1)
     {
-        // Логика для поиска лучшего хода в зависимости от состояния на доске
-        // ...
-         // Возврат лучшего найденного хода
+        // Инициализация состояния, если не указано
+        if (state == 0) {
+            next_best_state.clear();
+            next_move.clear();
+        }
+
+        next_best_state.push_back(-1);
+        next_move.emplace_back(-1, -1, -1, -1); // Инициализируем на случай, если нет доступных ходов
+
+        double best_score = -INF; // Изначально присваиваем негативный бесконечный вес для максимизирующего игрока
+
+        // Поиск возможных ходов из текущей позиции
+        find_turns(x, y, mtx);
+        auto turns_now = turns;
+        bool have_beats_now = have_beats;
+
+        // Если нет доступных ходов или нет побитий, возвращаем оценку для текущего состояния
+        if (turns_now.empty()) {
+            return calc_score(mtx, color);
+        }
+
+        // Перебор всех возможных ходов
+        for (auto turn : turns_now) {
+            size_t next_state = next_move.size(); // Состояние для следующего хода
+            double score;
+
+            // Выполнение хода и получение нового состояния
+            vector<vector<POS_T>> new_mtx = make_turn(mtx, turn);
+
+            // Если доступны побития, выполняем рекурсивный вызов для максимизирующего игрока
+            if (have_beats_now) {
+                score = find_first_best_turn(new_mtx, color, turn.x2, turn.y2, next_state);
+            }
+            else {
+                // Альтернативный вызов для минимизирующего игрока
+                score = -find_first_best_turn(new_mtx, !color, 0, -1, next_state);
+            }
+
+            // Обновление лучшего хода, если найден лучший
+            if (score > best_score) {
+                best_score = score;
+                next_best_state[state] = next_state; // Обновляем состояние, если находим более лучший ход
+                next_move[state] = turn; // Обновляем текущий лучший ход
+            }
+
+            // Альфа-бета отсечение - минимизируем количество проверок
+            if (alpha != -1 && best_score >= alpha) {
+                break; // Если уже нашли лучший ход, выходим из цикла
+            }
+        }
+
+        return best_score; // Возврат лучшей оценки для данного состояния
     }
-    // Метод для рекурсивного поиска лучших ходов удаленный
-    double find_best_turns_rec(vector<vector<POS_T>> mtx, const bool color, const size_t depth, double alpha = -1,
-                               double beta = INF + 1, const POS_T x = -1, const POS_T y = -1)
+
+    double find_best_turns_rec(vector<vector<POS_T>> mtx, const bool color, const size_t depth,
+        double alpha = -INF, double beta = INF, const POS_T x = -1, const POS_T y = -1)
     {
-        // Рекурсивная логика для поиска лучших ходов
-        // ...
+        // Оценка окончания игры (например, глубина поиска или конечное состояние доски)
+        if (depth == 0) {
+            return calc_score(mtx, color); // Возврат оценки текущего состояния
+        }
+
+        bool have_moves = false; // Флаг для определения, есть ли доступные ходы
+        double best_score;
+
+        // Получение доступных ходов
+        find_turns(x, y, mtx); // Предполагаем, что метод `find_turns` заполняет доступные ходы в вектор `turns`
+
+        if (turns.empty()) {
+            return calc_score(mtx, color); // Если нет доступных ходов, возвращаем оценку
+        }
+
+        if (color) {
+            best_score = -INF; // Инициализируем при максимизирующем игроке
+            for (const auto& turn : turns) {
+                have_moves = true; // Обнаружены ходы
+                vector<vector<POS_T>> new_mtx = make_turn(mtx, turn); // Применяем ход и получаем новую матрицу
+                double score = find_best_turns_rec(new_mtx, !color, depth - 1, alpha, beta, turn.x2, turn.y2); // Рекурсивный вызов для минимизирующего игрока
+
+                best_score = std::max(best_score, score); // Обновляем наилучшее значение
+                alpha = std::max(alpha, best_score); // Обновляем альфа
+
+                if (beta <= alpha) { // Альфа-бета-отсечение
+                    break; // Выходим, если уже нашли подходящий ход
+                }
+            }
+        }
+        else {
+            best_score = INF; // Инициализируем при минимизирующем игроке
+            for (const auto& turn : turns) {
+                have_moves = true; // Обнаружены ходы
+                vector<vector<POS_T>> new_mtx = make_turn(mtx, turn); // Применяем ход и получаем новую матрицу
+                double score = find_best_turns_rec(new_mtx, !color, depth - 1, alpha, beta, turn.x2, turn.y2); // Рекурсивный вызов для максимизирующего игрока
+
+                best_score = std::min(best_score, score); // Обновляем наилучшее значение
+                beta = std::min(beta, best_score); // Обновляем бета
+
+                if (beta <= alpha) { // Альфа-бета-отсечение
+                    break; // Выходим, если уже нашли подходящий ход
+                }
+            }
+        }
+
+        return best_score; // Возврат лучшей оценки для текущего состояния
     }
+
 
 public:
     // Метод для поиска возможных ходов для определенного цвета (игрока)
